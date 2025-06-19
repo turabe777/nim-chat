@@ -169,10 +169,11 @@ class TextSplitter:
 
 
 class EmbeddingGenerator:
-    """埋め込みベクトルを生成するクラス"""
+    """埋め込みベクトルを生成するクラス（ローカル処理）"""
     
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model_name)
+        self.embedding_dimension = self.model.get_sentence_embedding_dimension()
     
     def generate_embeddings(self, texts: List[str]) -> np.ndarray:
         """
@@ -205,13 +206,310 @@ class EmbeddingGenerator:
         return documents
 
 
+class NGCEmbeddingGenerator:
+    """NVIDIA NGC APIを使用した埋め込みベクトル生成クラス"""
+    
+    def __init__(
+        self, 
+        api_key: str, 
+        model_name: str = "NV-Embed-QA"
+    ):
+        self.api_key = api_key
+        self.base_url = "https://integrate.api.nvidia.com/v1"
+        self.model_name = model_name
+        self.embedding_dimension = None  # 初回実行時に自動検出
+    
+    def _get_embedding_endpoint(self) -> str:
+        """埋め込みAPIエンドポイントを構築"""
+        return f"{self.base_url}/embeddings"
+    
+    def _detect_embedding_dimension(self) -> int:
+        """埋め込み次元を自動検出"""
+        if self.embedding_dimension is not None:
+            return self.embedding_dimension
+        
+        # テスト用テキストで次元を検出
+        test_embedding = self.generate_embeddings(["test"])
+        self.embedding_dimension = test_embedding.shape[1]
+        return self.embedding_dimension
+    
+    def generate_embeddings(
+        self, 
+        texts: List[str], 
+        input_type: str = "passage"
+    ) -> np.ndarray:
+        """
+        NVIDIA NGC APIを使用してテキストの埋め込みベクトルを生成する
+        
+        Args:
+            texts: テキストのリスト
+            input_type: 入力タイプ（"passage" for indexing, "query" for querying）
+            
+        Returns:
+            埋め込みベクトルの配列
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # APIペイロード構築
+        payload = {
+            "input": texts,
+            "model": self.model_name,
+            "input_type": input_type
+        }
+        
+        endpoint_url = self._get_embedding_endpoint()
+        
+        try:
+            print(f"Debug: NGC Embedding API request to {endpoint_url}")
+            print(f"Debug: Model: {self.model_name}, Input type: {input_type}")
+            print(f"Debug: Text count: {len(texts)}")
+            
+            response = requests.post(
+                endpoint_url,
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            print(f"Debug: NGC Embedding API response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                
+                # 埋め込みベクトルを抽出
+                if "data" in response_data:
+                    embeddings = []
+                    for item in response_data["data"]:
+                        if "embedding" in item:
+                            embeddings.append(item["embedding"])
+                    
+                    if embeddings:
+                        embeddings_array = np.array(embeddings)
+                        
+                        # 次元を記録
+                        if self.embedding_dimension is None:
+                            self.embedding_dimension = embeddings_array.shape[1]
+                            print(f"Debug: Detected NGC embedding dimension: {self.embedding_dimension}")
+                        
+                        return embeddings_array
+                
+                raise ValueError(f"Unexpected NGC API response format: {response_data}")
+            
+            elif response.status_code == 422:
+                # モデル名が無効な場合のフォールバック
+                if self.model_name == "NV-Embed-QA":
+                    print("Debug: Trying fallback NGC embedding model")
+                    self.model_name = "nvidia/nv-embedqa-e5-v5"
+                    return self.generate_embeddings(texts, input_type)
+                else:
+                    raise ValueError(f"Invalid NGC model or parameters: {response.text}")
+            
+            elif response.status_code == 404:
+                raise ValueError(f"NGC embedding endpoint not found: {endpoint_url}")
+            
+            else:
+                response.raise_for_status()
+                
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"NGC Embedding API request failed: {e}")
+    
+    def embed_documents(self, documents: List[Document]) -> List[Document]:
+        """
+        ドキュメントに埋め込みベクトルを追加する
+        
+        Args:
+            documents: ドキュメントのリスト
+            
+        Returns:
+            埋め込みベクトルが追加されたドキュメントのリスト
+        """
+        texts = [doc.content for doc in documents]
+        
+        # バッチサイズを考慮した処理
+        batch_size = 10  # NGC APIの制限に応じて調整
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_embeddings = self.generate_embeddings(batch_texts, input_type="passage")
+            all_embeddings.extend(batch_embeddings)
+        
+        embeddings = np.array(all_embeddings)
+        
+        for doc, embedding in zip(documents, embeddings):
+            doc.embedding = embedding
+        
+        return documents
+
+
+class NIMEmbeddingGenerator:
+    """NVIDIA NIM APIを使用した埋め込みベクトル生成クラス"""
+    
+    def __init__(
+        self, 
+        api_key: str, 
+        base_url: str,
+        model_name: str = "NV-Embed-QA"
+    ):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.model_name = model_name
+        self.embedding_dimension = None  # 初回実行時に自動検出
+    
+    def _get_embedding_endpoint(self) -> str:
+        """埋め込みAPIエンドポイントを構築"""
+        if self.base_url.endswith('/v1'):
+            return f"{self.base_url}/embeddings"
+        else:
+            return f"{self.base_url}/v1/embeddings"
+    
+    def _detect_embedding_dimension(self) -> int:
+        """埋め込み次元を自動検出"""
+        if self.embedding_dimension is not None:
+            return self.embedding_dimension
+        
+        # テスト用テキストで次元を検出
+        test_embedding = self.generate_embeddings(["test"])
+        self.embedding_dimension = test_embedding.shape[1]
+        return self.embedding_dimension
+    
+    def generate_embeddings(
+        self, 
+        texts: List[str], 
+        input_type: str = "passage"
+    ) -> np.ndarray:
+        """
+        NVIDIA NIM APIを使用してテキストの埋め込みベクトルを生成する
+        
+        Args:
+            texts: テキストのリスト
+            input_type: 入力タイプ（"passage" for indexing, "query" for querying）
+            
+        Returns:
+            埋め込みベクトルの配列
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # APIペイロード構築
+        payload = {
+            "input": texts,
+            "model": self.model_name,
+            "input_type": input_type
+        }
+        
+        endpoint_url = self._get_embedding_endpoint()
+        
+        try:
+            print(f"Debug: Embedding API request to {endpoint_url}")
+            print(f"Debug: Model: {self.model_name}, Input type: {input_type}")
+            print(f"Debug: Text count: {len(texts)}")
+            
+            response = requests.post(
+                endpoint_url,
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            print(f"Debug: Embedding API response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                
+                # 埋め込みベクトルを抽出
+                if "data" in response_data:
+                    embeddings = []
+                    for item in response_data["data"]:
+                        if "embedding" in item:
+                            embeddings.append(item["embedding"])
+                    
+                    if embeddings:
+                        embeddings_array = np.array(embeddings)
+                        
+                        # 次元を記録
+                        if self.embedding_dimension is None:
+                            self.embedding_dimension = embeddings_array.shape[1]
+                            print(f"Debug: Detected embedding dimension: {self.embedding_dimension}")
+                        
+                        return embeddings_array
+                
+                raise ValueError(f"Unexpected API response format: {response_data}")
+            
+            elif response.status_code == 422:
+                # モデル名が無効な場合のフォールバック
+                if self.model_name == "NV-Embed-QA":
+                    print("Debug: Trying fallback embedding model")
+                    self.model_name = "nvidia/nv-embedqa-e5-v5"
+                    return self.generate_embeddings(texts, input_type)
+                else:
+                    raise ValueError(f"Invalid model or parameters: {response.text}")
+            
+            elif response.status_code == 404:
+                raise ValueError(f"Embedding endpoint not found: {endpoint_url}")
+            
+            else:
+                response.raise_for_status()
+                
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"NIM Embedding API request failed: {e}")
+    
+    def embed_documents(self, documents: List[Document]) -> List[Document]:
+        """
+        ドキュメントに埋め込みベクトルを追加する
+        
+        Args:
+            documents: ドキュメントのリスト
+            
+        Returns:
+            埋め込みベクトルが追加されたドキュメントのリスト
+        """
+        texts = [doc.content for doc in documents]
+        
+        # バッチサイズを考慮した処理
+        batch_size = 10  # NIM APIの制限に応じて調整
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_embeddings = self.generate_embeddings(batch_texts, input_type="passage")
+            all_embeddings.extend(batch_embeddings)
+        
+        embeddings = np.array(all_embeddings)
+        
+        for doc, embedding in zip(documents, embeddings):
+            doc.embedding = embedding
+        
+        return documents
+
+
 class VectorStore:
     """ベクトルストレージクラス"""
     
-    def __init__(self, dimension: int = 384):
+    def __init__(self, dimension: Optional[int] = None):
         self.dimension = dimension
-        self.index = faiss.IndexFlatIP(dimension)
+        self.index = None
         self.documents: List[Document] = []
+        self.is_initialized = False
+    
+    def _initialize_index(self, dimension: int) -> None:
+        """FAISSインデックスを初期化"""
+        if self.dimension is None:
+            self.dimension = dimension
+        elif self.dimension != dimension:
+            print(f"Warning: Dimension mismatch. Expected {self.dimension}, got {dimension}")
+            print("Reinitializing vector store with new dimension")
+            self.dimension = dimension
+            self.documents = []  # 既存データをクリア
+        
+        self.index = faiss.IndexFlatIP(self.dimension)
+        self.is_initialized = True
+        print(f"Debug: Vector store initialized with dimension {self.dimension}")
     
     def add_documents(self, documents: List[Document]) -> None:
         """
@@ -220,9 +518,22 @@ class VectorStore:
         Args:
             documents: 追加するドキュメントのリスト
         """
+        if not documents:
+            return
+        
         embeddings = np.array([doc.embedding for doc in documents])
+        
+        # インデックスが未初期化の場合、次元を自動検出して初期化
+        if not self.is_initialized:
+            self._initialize_index(embeddings.shape[1])
+        
+        # 次元チェック
+        if embeddings.shape[1] != self.dimension:
+            raise ValueError(f"Embedding dimension mismatch: expected {self.dimension}, got {embeddings.shape[1]}")
+        
         self.index.add(embeddings.astype('float32'))
         self.documents.extend(documents)
+        print(f"Debug: Added {len(documents)} documents to vector store")
     
     def search(self, query_embedding: np.ndarray, k: int = 5) -> List[Tuple[Document, float]]:
         """
@@ -235,13 +546,23 @@ class VectorStore:
         Returns:
             (ドキュメント, スコア)のタプルのリスト
         """
+        if not self.is_initialized:
+            return []
+        
+        if len(query_embedding.shape) == 1:
+            query_embedding = query_embedding.reshape(1, -1)
+        
+        # 次元チェック
+        if query_embedding.shape[1] != self.dimension:
+            raise ValueError(f"Query embedding dimension mismatch: expected {self.dimension}, got {query_embedding.shape[1]}")
+        
         scores, indices = self.index.search(
-            query_embedding.astype('float32').reshape(1, -1), k
+            query_embedding.astype('float32'), k
         )
         
         results = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < len(self.documents):
+            if idx < len(self.documents) and idx >= 0:  # 有効なインデックスのみ
                 results.append((self.documents[idx], float(score)))
         
         return results
@@ -676,17 +997,62 @@ class RAGApplication:
         self, 
         nvidia_api_key: str, 
         base_url: Optional[str] = None,
-        model_name: str = "nvidia/llama-3.1-nemotron-70b-instruct"
+        model_name: str = "nvidia/llama-3.1-nemotron-70b-instruct",
+        use_nim_embedding: bool = False,
+        embedding_model: str = "NV-Embed-QA",
+        embedding_base_url: Optional[str] = None,
+        embedding_type: str = "local"  # "local", "ngc", "nim"
     ):
         self.pdf_loader = PDFLoader()
         self.text_splitter = TextSplitter()
-        self.embedding_generator = EmbeddingGenerator()
         self.vector_store = VectorStore()
         self.llm = NVIDIALLM(
             api_key=nvidia_api_key,
             base_url=base_url,
             model_name=model_name
         )
+        
+        # 埋め込み生成方式を選択
+        self.use_nim_embedding = use_nim_embedding
+        self.embedding_type = embedding_type
+        
+        if embedding_type == "ngc":
+            print("Attempting to use NVIDIA NGC API for embeddings")
+            try:
+                self.embedding_generator = NGCEmbeddingGenerator(
+                    api_key=nvidia_api_key,
+                    model_name=embedding_model
+                )
+                # 接続テストを実行
+                test_embedding = self.embedding_generator.generate_embeddings(["test"], input_type="passage")
+                print(f"✅ NGC embedding successful - dimension: {test_embedding.shape[1]}")
+            except Exception as e:
+                print(f"⚠️ NGC embedding failed: {e}")
+                print("Falling back to local embedding model")
+                self.embedding_generator = EmbeddingGenerator()
+                self.use_nim_embedding = False
+        elif embedding_type == "nim" and (embedding_base_url or base_url):
+            print("Attempting to use NVIDIA NIM for embeddings")
+            try:
+                embedding_url = embedding_base_url or base_url
+                self.embedding_generator = NIMEmbeddingGenerator(
+                    api_key=nvidia_api_key,
+                    base_url=embedding_url,
+                    model_name=embedding_model
+                )
+                # 接続テストを実行
+                test_embedding = self.embedding_generator.generate_embeddings(["test"], input_type="passage")
+                print(f"✅ NIM embedding successful - dimension: {test_embedding.shape[1]}")
+            except Exception as e:
+                print(f"⚠️ NIM embedding failed: {e}")
+                print("Falling back to local embedding model")
+                self.embedding_generator = EmbeddingGenerator()
+                self.use_nim_embedding = False
+        else:
+            print("Using local embedding model")
+            self.embedding_generator = EmbeddingGenerator()
+            self.use_nim_embedding = False
+        
         self.is_initialized = False
     
     def initialize_from_pdfs(self, pdf_folder_path: str) -> None:
@@ -733,7 +1099,10 @@ class RAGApplication:
             return "RAGシステムが初期化されていません。initialize_from_pdfs()を実行してください。"
         
         # 質問の埋め込みベクトルを生成
-        query_embedding = self.embedding_generator.generate_embeddings([question])[0]
+        if isinstance(self.embedding_generator, NIMEmbeddingGenerator):
+            query_embedding = self.embedding_generator.generate_embeddings([question], input_type="query")[0]
+        else:
+            query_embedding = self.embedding_generator.generate_embeddings([question])[0]
         
         # 関連ドキュメントを検索
         search_results = self.vector_store.search(query_embedding, k)
@@ -772,7 +1141,10 @@ class RAGApplication:
         if not self.is_initialized:
             return []
         
-        query_embedding = self.embedding_generator.generate_embeddings([question])[0]
+        if isinstance(self.embedding_generator, NIMEmbeddingGenerator):
+            query_embedding = self.embedding_generator.generate_embeddings([question], input_type="query")[0]
+        else:
+            query_embedding = self.embedding_generator.generate_embeddings([question])[0]
         search_results = self.vector_store.search(query_embedding, k)
         
         sources = []

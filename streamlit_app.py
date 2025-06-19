@@ -78,6 +78,14 @@ def initialize_session_state() -> None:
         st.session_state.nim_endpoint_input = ""
     if "selected_model" not in st.session_state:
         st.session_state.selected_model = "nvidia/llama-3.1-nemotron-70b-instruct"
+    if "use_nim_embedding" not in st.session_state:
+        st.session_state.use_nim_embedding = False
+    if "embedding_model" not in st.session_state:
+        st.session_state.embedding_model = "nvidia/nv-embedqa-e5-v5"
+    if "embedding_endpoint" not in st.session_state:
+        st.session_state.embedding_endpoint = ""
+    if "embedding_endpoint_type" not in st.session_state:
+        st.session_state.embedding_endpoint_type = "local"
 
 def get_rag_application(force_recreate: bool = False) -> Optional[RAGApplication]:
     """RAGアプリケーションを取得または初期化"""
@@ -109,10 +117,33 @@ def get_rag_application(force_recreate: bool = False) -> Optional[RAGApplication
     
     if st.session_state.rag_app is None or force_recreate:
         try:
+            # 埋め込みエンドポイントを決定
+            embedding_base_url = None
+            use_nim_embedding = st.session_state.use_nim_embedding
+            
+            if st.session_state.embedding_endpoint_type == "ngc":
+                # NGC API embeddings - use cloud endpoint
+                embedding_base_url = None  # NGC API uses default endpoint
+                use_nim_embedding = True
+            elif st.session_state.embedding_endpoint_type == "nim":
+                # NIM API embeddings
+                if st.session_state.embedding_endpoint.strip():
+                    embedding_base_url = st.session_state.embedding_endpoint.strip()
+                else:
+                    embedding_base_url = base_url  # 推論エンドポイントと同じ
+                use_nim_embedding = True
+            else:
+                # Local embeddings
+                use_nim_embedding = False
+            
             st.session_state.rag_app = RAGApplication(
                 nvidia_api_key=nvidia_api_key,
                 base_url=base_url,
-                model_name=st.session_state.selected_model
+                model_name=st.session_state.selected_model,
+                use_nim_embedding=use_nim_embedding,
+                embedding_model=st.session_state.embedding_model,
+                embedding_base_url=embedding_base_url,
+                embedding_type=st.session_state.embedding_endpoint_type
             )
             
             # NIMモードの場合、利用可能なモデルでセッション状態を更新
@@ -213,6 +244,9 @@ def main() -> None:
         # エンドポイント設定
         st.subheader("🌐 エンドポイント設定")
         
+        # LLM設定
+        st.markdown("### 🤖 LLMエンドポイント")
+        
         # エンドポイントタイプ選択
         endpoint_options = {
             "ngc": "NGC API (cloud)",
@@ -221,7 +255,7 @@ def main() -> None:
         }
         
         new_endpoint_type = st.selectbox(
-            "エンドポイントタイプ",
+            "LLMエンドポイントタイプ",
             options=list(endpoint_options.keys()),
             format_func=lambda x: endpoint_options[x],
             index=list(endpoint_options.keys()).index(st.session_state.endpoint_type)
@@ -232,6 +266,56 @@ def main() -> None:
             st.session_state.endpoint_type = new_endpoint_type
             st.session_state.rag_app = None  # 再初期化が必要
             st.session_state.is_initialized = False
+        
+        # LLMモデル選択（エンドポイントタイプの直下に配置）
+        rag_app = get_rag_application()
+        if rag_app:
+            endpoint_type = rag_app.llm.actual_endpoint_type
+            available_models = rag_app.llm.get_available_models()
+            
+            if endpoint_type == "nim":
+                # NIMの場合：自動検出されたモデルを表示のみ
+                actual_model = available_models[0] if available_models else st.session_state.selected_model
+                st.success(f"🤖 **NIM検出LLMモデル**: `{actual_model}`")
+                st.caption("💡 NIMサーバーからモデルを自動検出しました")
+                
+                # セッション状態を自動検出されたモデルに更新
+                if actual_model != st.session_state.selected_model:
+                    st.session_state.selected_model = actual_model
+                    
+            elif endpoint_type == "ngc":
+                # NGC APIの場合：モデル選択UI表示
+                if len(available_models) > 1:
+                    new_model = st.selectbox(
+                        "LLMモデル選択",
+                        options=available_models,
+                        index=available_models.index(st.session_state.selected_model) 
+                        if st.session_state.selected_model in available_models else 0,
+                        help="使用するNGC LLMモデルを選択"
+                    )
+                    if new_model != st.session_state.selected_model:
+                        st.session_state.selected_model = new_model
+                        st.session_state.rag_app = None
+                        st.session_state.is_initialized = False
+                else:
+                    st.info(f"🤖 使用LLMモデル: {st.session_state.selected_model}")
+                    
+            else:
+                # カスタムエンドポイントの場合：従来通り
+                if len(available_models) > 1:
+                    new_model = st.selectbox(
+                        "LLMモデル選択",
+                        options=available_models,
+                        index=available_models.index(st.session_state.selected_model) 
+                        if st.session_state.selected_model in available_models else 0,
+                        help="使用するLLMモデルを選択"
+                    )
+                    if new_model != st.session_state.selected_model:
+                        st.session_state.selected_model = new_model
+                        st.session_state.rag_app = None
+                        st.session_state.is_initialized = False
+                else:
+                    st.info(f"🤖 使用LLMモデル: {st.session_state.selected_model}")
         
         # カスタムエンドポイント入力
         if st.session_state.endpoint_type == "custom":
@@ -291,8 +375,8 @@ def main() -> None:
                     **注意**: NIMサーバーで利用可能なモデル名は、サーバーの設定により異なります。
                     """)
         
-        # 接続テストボタン
-        if st.button("🔍 接続テスト", help="エンドポイントへの接続をテスト"):
+        # LLM接続テストボタン
+        if st.button("🔍 LLM接続テスト", help="LLMエンドポイントへの接続をテスト"):
             rag_app = get_rag_application()
             if rag_app:
                 with st.spinner("接続をテスト中..."):
@@ -331,6 +415,132 @@ def main() -> None:
                             3. NIMサーバーの認証設定を確認
                             """)
         
+        # 埋め込み設定
+        st.markdown("### 📊 Embeddingエンドポイント")
+        
+        # 埋め込み方式選択
+        embedding_options = {
+            "local": "ローカル（Sentence Transformers）",
+            "ngc": "NVIDIA NGC API",
+            "nim": "NVIDIA NIM API"
+        }
+        
+        # 現在の設定から適切なオプションを決定
+        current_embedding_type = st.session_state.embedding_endpoint_type
+        if not st.session_state.use_nim_embedding:
+            current_embedding_type = "local"
+        
+        new_embedding_type = st.selectbox(
+            "Embeddingエンドポイントタイプ",
+            options=list(embedding_options.keys()),
+            format_func=lambda x: embedding_options[x],
+            index=list(embedding_options.keys()).index(current_embedding_type),
+            help="埋め込みベクトル生成のエンドポイントタイプを選択"
+        )
+        
+        if new_embedding_type != current_embedding_type:
+            st.session_state.embedding_endpoint_type = new_embedding_type
+            st.session_state.use_nim_embedding = (new_embedding_type != "local")
+            st.session_state.rag_app = None
+            st.session_state.is_initialized = False
+        
+        # 埋め込み方式別の設定（エンドポイントタイプの直下に配置）
+        if st.session_state.embedding_endpoint_type == "ngc":
+            # NGC Embeddingモデル選択
+            embedding_models = [
+                "nvidia/nv-embedqa-e5-v5", 
+                "nvidia/nv-embed-v1"
+            ]
+            
+            new_embedding_model = st.selectbox(
+                "Embeddingモデル選択",
+                options=embedding_models,
+                index=embedding_models.index(st.session_state.embedding_model) 
+                if st.session_state.embedding_model in embedding_models else 0,
+                help="使用するNGC Embeddingモデルを選択"
+            )
+            
+            if new_embedding_model != st.session_state.embedding_model:
+                st.session_state.embedding_model = new_embedding_model
+                st.session_state.rag_app = None
+                st.session_state.is_initialized = False
+            
+            # NGC接続テスト
+            if st.button("🔍 Embedding接続テスト", help="NGC Embedding APIへの接続をテスト"):
+                with st.spinner("NGC Embedding APIをテスト中..."):
+                    try:
+                        from rag_app import NGCEmbeddingGenerator
+                        ngc_generator = NGCEmbeddingGenerator(
+                            api_key=nvidia_api_key,
+                            model_name=st.session_state.embedding_model
+                        )
+                        test_texts = ["テスト埋め込み"]
+                        embeddings = ngc_generator.generate_embeddings(test_texts, input_type="query")
+                        st.success(f"✅ NGC Embedding接続成功 - 次元: {embeddings.shape[1]}")
+                        st.info(f"📊 Embeddingモデル: {st.session_state.embedding_model}")
+                    except Exception as e:
+                        st.error(f"❌ NGC Embedding接続失敗: {e}")
+                        st.info("💡 API Keyやモデル名を確認してください")
+            
+        elif st.session_state.embedding_endpoint_type == "nim":
+            # 埋め込みエンドポイント設定
+            new_embedding_endpoint = st.text_input(
+                "専用EmbeddingエンドポイントURL",
+                value=st.session_state.embedding_endpoint,
+                placeholder="http://embedding-server:8000/v1 (空欄=LLMエンドポイントと同じ)",
+                help="Embedding専用エンドポイントURL。空欄の場合はLLMエンドポイントを使用"
+            )
+            
+            if new_embedding_endpoint != st.session_state.embedding_endpoint:
+                st.session_state.embedding_endpoint = new_embedding_endpoint
+                st.session_state.rag_app = None
+                st.session_state.is_initialized = False
+            
+            # NIM Embeddingモデル選択
+            if st.session_state.endpoint_type in ["nim", "custom"] and (st.session_state.nim_endpoint_input or st.session_state.custom_endpoint):
+                embedding_models = [
+                    "nvidia/nv-embedqa-e5-v5", 
+                    "nvidia/nv-embed-v1"
+                ]
+                
+                new_embedding_model = st.selectbox(
+                    "Embeddingモデル選択",
+                    options=embedding_models,
+                    index=embedding_models.index(st.session_state.embedding_model) 
+                    if st.session_state.embedding_model in embedding_models else 0,
+                    help="使用するNIM Embeddingモデルを選択"
+                )
+                
+                if new_embedding_model != st.session_state.embedding_model:
+                    st.session_state.embedding_model = new_embedding_model
+                    st.session_state.rag_app = None
+                    st.session_state.is_initialized = False
+                
+                # NIM Embedding接続テスト
+                if st.button("🔍 Embedding接続テスト", help="NIM Embeddingエンドポイントへの接続をテスト"):
+                    with st.spinner("NIM Embedding APIをテスト中..."):
+                        rag_app = get_rag_application()
+                        if rag_app and hasattr(rag_app.embedding_generator, 'generate_embeddings'):
+                            try:
+                                test_texts = ["テスト埋め込み"]
+                                if hasattr(rag_app.embedding_generator, 'base_url'):
+                                    embeddings = rag_app.embedding_generator.generate_embeddings(test_texts, input_type="query")
+                                else:
+                                    embeddings = rag_app.embedding_generator.generate_embeddings(test_texts)
+                                st.success(f"✅ NIM Embedding接続成功 - 次元: {embeddings.shape[1]}")
+                                st.info(f"📊 Embeddingモデル: {st.session_state.embedding_model}")
+                            except Exception as e:
+                                st.error(f"❌ NIM Embedding接続失敗: {e}")
+                                st.info("💡 ローカル埋め込みにフォールバックします")
+                        else:
+                            st.warning("⚠️ RAGアプリケーションを初期化してからテストしてください")
+            else:
+                st.warning("⚠️ NIM埋め込みを使用するにはNIMエンドポイントが必要です")
+        else:
+            # ローカル埋め込み設定
+            st.info("🏠 **ローカル埋め込み**: `all-MiniLM-L6-v2` (384次元)")
+            st.caption("💡 Apple Silicon GPU使用")
+        
         # エンドポイント情報表示
         rag_app = get_rag_application()
         if rag_app:
@@ -340,8 +550,28 @@ def main() -> None:
             st.markdown(f"""
             **現在の設定:**
             - エンドポイント: `{endpoint_type.upper()}`
-            - URL: `{endpoint_info['base_url']}`
+            - 推論URL: `{endpoint_info['base_url']}`
             """)
+            
+            # 埋め込み情報の表示
+            if st.session_state.embedding_endpoint_type == "ngc":
+                st.markdown(f"- 埋め込み: NGC API (`{st.session_state.embedding_model}`)")
+                if rag_app.use_nim_embedding:
+                    st.success(f"✅ **NGC埋め込み**: 接続成功")
+                else:
+                    st.warning(f"⚠️ **埋め込みフォールバック**: ローカル処理中")
+            elif st.session_state.embedding_endpoint_type == "nim":
+                if st.session_state.embedding_endpoint:
+                    st.markdown(f"- 埋め込みURL: `{st.session_state.embedding_endpoint}`")
+                else:
+                    st.markdown(f"- 埋め込みURL: `{endpoint_info['base_url']}` (推論と同じ)")
+                
+                if rag_app.use_nim_embedding:
+                    st.success(f"✅ **NIM埋め込み**: `{st.session_state.embedding_model}`")
+                else:
+                    st.warning(f"⚠️ **埋め込みフォールバック**: ローカル処理中")
+            else:
+                st.markdown(f"- 埋め込み: ローカル (Apple Silicon GPU)")
             
             if endpoint_type == "nim":
                 # NIMの場合：自動検出されたモデルを表示
@@ -392,56 +622,6 @@ def main() -> None:
         
         # RAGシステム設定
         st.subheader("🔧 RAGシステム設定")
-        
-        # モデル選択
-        rag_app = get_rag_application()
-        if rag_app:
-            endpoint_type = rag_app.llm.actual_endpoint_type
-            available_models = rag_app.llm.get_available_models()
-            
-            if endpoint_type == "nim":
-                # NIMの場合：自動検出されたモデルを表示のみ
-                actual_model = available_models[0] if available_models else st.session_state.selected_model
-                st.success(f"🤖 **NIM検出モデル**: `{actual_model}`")
-                st.caption("💡 NIMサーバーからモデルを自動検出しました")
-                
-                # セッション状態を自動検出されたモデルに更新
-                if actual_model != st.session_state.selected_model:
-                    st.session_state.selected_model = actual_model
-                    
-            elif endpoint_type == "ngc":
-                # NGC APIの場合：モデル選択UI表示
-                if len(available_models) > 1:
-                    new_model = st.selectbox(
-                        "NGC APIモデル選択",
-                        options=available_models,
-                        index=available_models.index(st.session_state.selected_model) 
-                        if st.session_state.selected_model in available_models else 0,
-                        help="使用するNGC APIモデルを選択"
-                    )
-                    if new_model != st.session_state.selected_model:
-                        st.session_state.selected_model = new_model
-                        st.session_state.rag_app = None
-                        st.session_state.is_initialized = False
-                else:
-                    st.info(f"🤖 使用モデル: {st.session_state.selected_model}")
-                    
-            else:
-                # カスタムエンドポイントの場合：従来通り
-                if len(available_models) > 1:
-                    new_model = st.selectbox(
-                        "モデル選択",
-                        options=available_models,
-                        index=available_models.index(st.session_state.selected_model) 
-                        if st.session_state.selected_model in available_models else 0,
-                        help="使用するLLMモデルを選択"
-                    )
-                    if new_model != st.session_state.selected_model:
-                        st.session_state.selected_model = new_model
-                        st.session_state.rag_app = None
-                        st.session_state.is_initialized = False
-                else:
-                    st.info(f"🤖 使用モデル: {st.session_state.selected_model}")
         
         chunk_size = st.slider("チャンクサイズ", 400, 1200, 800, 50)
         chunk_overlap = st.slider("チャンク重複", 50, 200, 100, 25)

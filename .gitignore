@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# PDF files and uploads
+pdfs/
+*.pdf
+
+# Environment variables
+.env
+
+# Test and debug files (may contain sensitive info)
+test_*.py
+debug_*.py
+advanced_rag_example.py

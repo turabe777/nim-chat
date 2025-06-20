@@ -1,0 +1,148 @@
+version: '3.8'
+
+services:
+  # Document Service - PDFアップロード・管理
+  document-service:
+    build:
+      context: ./services/document-service
+      dockerfile: Dockerfile
+    container_name: rag-document-service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./services/document-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=document-service
+      - PORT=8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+
+  # Text Processing Service - テキスト分割・チャンク化
+  text-processing-service:
+    build:
+      context: ./services/text-processing-service
+      dockerfile: Dockerfile
+    container_name: rag-text-processing-service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./services/text-processing-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=text-processing-service
+      - PORT=8002
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+    depends_on:
+      - document-service
+
+  # Embedding Service - ベクトル埋め込み生成
+  embedding-service:
+    build:
+      context: ./services/embedding-service
+      dockerfile: Dockerfile
+    container_name: rag-embedding-service
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./services/embedding-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=embedding-service
+      - PORT=8003
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+    depends_on:
+      - text-processing-service
+
+  # Vector Store Service - ベクトル検索・インデックス
+  vector-store-service:
+    build:
+      context: ./services/vector-store-service
+      dockerfile: Dockerfile
+    container_name: rag-vector-store-service
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./services/vector-store-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=vector-store-service
+      - PORT=8004
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+    depends_on:
+      - embedding-service
+
+  # LLM Service - 質問応答・RAG統合
+  llm-service:
+    build:
+      context: ./services/llm-service
+      dockerfile: Dockerfile
+    container_name: rag-llm-service
+    ports:
+      - "8005:8005"
+    volumes:
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=llm-service
+      - PORT=8005
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+    depends_on:
+      - document-service
+      - text-processing-service
+      - embedding-service
+      - vector-store-service
+
+networks:
+  rag-network:
+    driver: bridge
+    name: rag-microservices-network
+
+volumes:
+  document_data:
+    driver: local
+  text_data:
+    driver: local
+  embedding_data:
+    driver: local
+  vector_data:
+    driver: local

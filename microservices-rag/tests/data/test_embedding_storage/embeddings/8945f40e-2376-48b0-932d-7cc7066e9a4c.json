@@ -1,0 +1,44 @@
+[
+  {
+    "embedding_id": "c21d6e14-22d2-4614-8373-640cbc64f9bd",
+    "chunk_id": "00000000-0000-0000-0000-000000000000",
+    "document_id": "8945f40e-2376-48b0-932d-7cc7066e9a4c",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:56:56.043840",
+    "metadata": {
+      "text_length": 20,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  },
+  {
+    "embedding_id": "19aa68be-2d19-498c-94e0-c24aff94cc7e",
+    "chunk_id": "00000000-0000-0000-0000-000000000000",
+    "document_id": "8945f40e-2376-48b0-932d-7cc7066e9a4c",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:56:56.043861",
+    "metadata": {
+      "text_length": 56,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  },
+  {
+    "embedding_id": "77da209f-03c9-4355-a65a-ef7d6281e51e",
+    "chunk_id": "00000000-0000-0000-0000-000000000000",
+    "document_id": "8945f40e-2376-48b0-932d-7cc7066e9a4c",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:56:56.043875",
+    "metadata": {
+      "text_length": 20,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  }
+]

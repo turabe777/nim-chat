@@ -1,0 +1,13 @@
+{
+  "document_id": "88f381d6-5d36-483c-b6b4-3b26ccf0e448",
+  "total_embeddings": 3,
+  "dimension": 384,
+  "model_name": "all-MiniLM-L6-v2",
+  "created_at": "2025-06-20T01:28:26.383422",
+  "vector_norms": [
+    1.0000000243172784,
+    1.0000001070195104,
+    1.000000073410497
+  ],
+  "storage_format": "numpy_json_hybrid"
+}

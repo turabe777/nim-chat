@@ -1,0 +1,44 @@
+[
+  {
+    "embedding_id": "907756fd-1a95-4029-bc55-6882e67eafd0",
+    "chunk_id": "ab35b8f2-dc49-4cd8-9b5d-542ac189112a",
+    "document_id": "88f381d6-5d36-483c-b6b4-3b26ccf0e448",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:28:26.382028",
+    "metadata": {
+      "text_length": 9,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  },
+  {
+    "embedding_id": "20363880-b68e-423d-90a0-72fe77e72974",
+    "chunk_id": "1d74d701-08c9-43f4-b856-f24f48db0e2d",
+    "document_id": "88f381d6-5d36-483c-b6b4-3b26ccf0e448",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:28:26.382044",
+    "metadata": {
+      "text_length": 9,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  },
+  {
+    "embedding_id": "88a6f046-eaff-4c8a-87f8-fd7997095c7c",
+    "chunk_id": "0ec61f84-2ac6-4bae-b6b2-a6fd575dc043",
+    "document_id": "88f381d6-5d36-483c-b6b4-3b26ccf0e448",
+    "dimension": 384,
+    "model_name": "all-MiniLM-L6-v2",
+    "created_at": "2025-06-20 01:28:26.382054",
+    "metadata": {
+      "text_length": 9,
+      "batch_index": 0,
+      "device": "cpu",
+      "normalized": true
+    }
+  }
+]

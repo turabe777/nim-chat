@@ -1,0 +1,41 @@
+[
+  {
+    "chunk_id": "c3057eb8-45ea-4627-985f-366840db527f",
+    "document_id": "dd0ca00f-914f-4e44-a6d9-2ac9541e8bc8",
+    "content": "これは統合テストのためのドキュメントです。複数の段落を含んでいます。この文書はマイクロサービスの完全なパイプラインを通して処理されます。Document Service、Text Processing Service、Embedding Service、そしてVector Store Serviceを経由します。最終的にはベクトル検索が可能な状態になります。マイクロサービス間のデータフローを検証し",
+    "chunk_index": 0,
+    "start_position": 0,
+    "end_position": 200,
+    "metadata": {
+      "length": 200,
+      "separator_used": "none"
+    },
+    "created_at": "2025-06-20 05:37:30.965898"
+  },
+  {
+    "chunk_id": "e99ef844-c746-490f-a27a-1da909b3f92b",
+    "document_id": "dd0ca00f-914f-4e44-a6d9-2ac9541e8bc8",
+    "content": "を経由します。最終的にはベクトル検索が可能な状態になります。マイクロサービス間のデータフローを検証します。",
+    "chunk_index": 1,
+    "start_position": 150,
+    "end_position": 203,
+    "metadata": {
+      "length": 53,
+      "separator_used": "。"
+    },
+    "created_at": "2025-06-20 05:37:30.966314"
+  },
+  {
+    "chunk_id": "6a26b8dc-4530-4f04-82d6-98ef696c5b32",
+    "document_id": "dd0ca00f-914f-4e44-a6d9-2ac9541e8bc8",
+    "content": "します。最終的にはベクトル検索が可能な状態になります。マイクロサービス間のデータフローを検証します。",
+    "chunk_index": 2,
+    "start_position": 153,
+    "end_position": 203,
+    "metadata": {
+      "length": 50,
+      "separator_used": "。"
+    },
+    "created_at": "2025-06-20 05:37:30.966321"
+  }
+]

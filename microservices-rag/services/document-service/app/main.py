@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import logging
 import uuid
 import os
@@ -171,6 +172,129 @@ async def get_document(document_id: str):
     except Exception as e:
         logger.error(f"Get document error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get document: {str(e)}")
+
+@app.get("/api/v1/documents")
+async def list_documents(skip: int = 0, limit: int = 50):
+    """全文書の一覧取得"""
+    try:
+        documents = []
+        
+        if not os.path.exists(METADATA_DIR):
+            return {
+                "success": True,
+                "documents": [],
+                "total": 0,
+                "skip": skip,
+                "limit": limit
+            }
+        
+        # メタデータファイルをすべて読み込み
+        for filename in os.listdir(METADATA_DIR):
+            if filename.endswith('.json'):
+                try:
+                    with open(os.path.join(METADATA_DIR, filename), 'r', encoding='utf-8') as f:
+                        metadata = json.load(f)
+                        documents.append(metadata)
+                except Exception as e:
+                    logger.warning(f"Failed to load metadata {filename}: {e}")
+                    continue
+        
+        # アップロード日時でソート（新しい順）
+        documents.sort(key=lambda x: x.get('upload_timestamp', 0), reverse=True)
+        
+        # ページネーション
+        total = len(documents)
+        paginated_docs = documents[skip:skip + limit]
+        
+        return {
+            "success": True,
+            "documents": paginated_docs,
+            "total": total,
+            "skip": skip,
+            "limit": limit
+        }
+        
+    except Exception as e:
+        logger.error(f"List documents error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list documents: {str(e)}")
+
+@app.delete("/api/v1/documents/{document_id}")
+async def delete_document(document_id: str):
+    """文書削除（ファイルとメタデータ）"""
+    try:
+        metadata_path = os.path.join(METADATA_DIR, f"{document_id}.json")
+        
+        # メタデータファイルの存在確認
+        if not os.path.exists(metadata_path):
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # メタデータを読み込んでファイル名を取得
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+        
+        saved_filename = metadata.get('saved_filename')
+        original_filename = metadata.get('filename', 'unknown')
+        
+        # ファイル削除
+        if saved_filename:
+            file_path = os.path.join(FILES_DIR, saved_filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Deleted file: {file_path}")
+        
+        # メタデータファイル削除
+        os.remove(metadata_path)
+        logger.info(f"Deleted metadata: {metadata_path}")
+        
+        return {
+            "success": True,
+            "message": f"Document '{original_filename}' deleted successfully",
+            "document_id": document_id
+        }
+        
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    except Exception as e:
+        logger.error(f"Delete document error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+@app.get("/api/v1/documents/{document_id}/download")
+async def download_document(document_id: str):
+    """文書ファイルダウンロード"""
+    try:
+        metadata_path = os.path.join(METADATA_DIR, f"{document_id}.json")
+        
+        # メタデータファイルの存在確認
+        if not os.path.exists(metadata_path):
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # メタデータを読み込んでファイル名を取得
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+        
+        saved_filename = metadata.get('saved_filename')
+        original_filename = metadata.get('filename', 'document.pdf')
+        
+        if not saved_filename:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        file_path = os.path.join(FILES_DIR, saved_filename)
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        
+        # ファイルをダウンロード用として返す
+        return FileResponse(
+            path=file_path,
+            filename=original_filename,
+            media_type='application/pdf'
+        )
+        
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    except Exception as e:
+        logger.error(f"Download document error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to download document: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

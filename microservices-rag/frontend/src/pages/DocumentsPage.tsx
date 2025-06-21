@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
-import { FileText, Upload as UploadIcon } from 'lucide-react';
+import { FileText, Upload as UploadIcon, Settings } from 'lucide-react';
 import { DocumentUpload } from '@/components/Upload/DocumentUpload';
+import DocumentManager from '@/components/Document/DocumentManager';
 import { DocumentUploadResponse } from '@/types';
 
 export const DocumentsPage: React.FC = () => {
   const [uploadedDocuments, setUploadedDocuments] = useState<DocumentUploadResponse[]>([]);
+  const [activeTab, setActiveTab] = useState<'upload' | 'manage'>('upload');
 
   const handleUploadComplete = (response: DocumentUploadResponse) => {
     setUploadedDocuments(prev => [...prev, response]);
+  };
+
+  const handleDocumentDeleted = (documentId: string) => {
+    // Remove from recent uploads if it exists there
+    setUploadedDocuments(prev => prev.filter(doc => doc.document_id !== documentId));
   };
 
   return (
@@ -25,8 +32,37 @@ export const DocumentsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Upload Section */}
-      <div className="card">
+      {/* Tab Navigation */}
+      <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 ${
+            activeTab === 'upload'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <UploadIcon className="w-4 h-4 inline mr-2" />
+          ドキュメントアップロード
+        </button>
+        <button
+          onClick={() => setActiveTab('manage')}
+          className={`px-6 py-3 text-sm font-medium border-b-2 ${
+            activeTab === 'manage'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <Settings className="w-4 h-4 inline mr-2" />
+          ドキュメント管理
+        </button>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'upload' ? (
+        <>
+          {/* Upload Section */}
+          <div className="card">
         <div className="flex items-center space-x-2 mb-6">
           <UploadIcon className="w-5 h-5 text-gray-700" />
           <h2 className="text-xl font-semibold text-gray-900">
@@ -78,30 +114,36 @@ export const DocumentsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Instructions */}
-      <div className="card bg-blue-50 border-blue-200">
-        <h3 className="text-lg font-semibold text-blue-900 mb-3">
-          使用方法
-        </h3>
-        <div className="space-y-2 text-blue-800">
-          <p className="flex items-start space-x-2">
-            <span className="font-bold">1.</span>
-            <span>PDFファイルをドラッグ&ドロップまたはクリックして選択</span>
-          </p>
-          <p className="flex items-start space-x-2">
-            <span className="font-bold">2.</span>
-            <span>オプションでドキュメント名を入力</span>
-          </p>
-          <p className="flex items-start space-x-2">
-            <span className="font-bold">3.</span>
-            <span>「アップロード開始」ボタンをクリック</span>
-          </p>
-          <p className="flex items-start space-x-2">
-            <span className="font-bold">4.</span>
-            <span>処理完了後、チャット画面で質問応答が可能</span>
-          </p>
+          {/* Instructions */}
+          <div className="card bg-blue-50 border-blue-200">
+            <h3 className="text-lg font-semibold text-blue-900 mb-3">
+              使用方法
+            </h3>
+            <div className="space-y-2 text-blue-800">
+              <p className="flex items-start space-x-2">
+                <span className="font-bold">1.</span>
+                <span>PDFファイルをドラッグ&ドロップまたはクリックして選択</span>
+              </p>
+              <p className="flex items-start space-x-2">
+                <span className="font-bold">2.</span>
+                <span>オプションでドキュメント名を入力</span>
+              </p>
+              <p className="flex items-start space-x-2">
+                <span className="font-bold">3.</span>
+                <span>「アップロード開始」ボタンをクリック</span>
+              </p>
+              <p className="flex items-start space-x-2">
+                <span className="font-bold">4.</span>
+                <span>処理完了後、チャット画面で質問応答が可能</span>
+              </p>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="card">
+          <DocumentManager onDocumentDeleted={handleDocumentDeleted} />
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, MessageCircle, User, Bot, Loader, AlertCircle } from 'lucide-react';
+import { Send, MessageCircle, User, Bot, Loader, AlertCircle, ExternalLink, FileText } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { llmService } from '@/services/api';
@@ -126,6 +126,42 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     });
   };
 
+  const getDocumentReferences = (contexts: ContextItem[]) => {
+    const docReferences = new Map<string, { filename: string; count: number }>();
+    
+    contexts.forEach(context => {
+      // chunk_idから document_id を抽出 (format: {document_id}_chunk_{number})
+      const chunkId = context.chunk_id;
+      const documentId = chunkId.split('_chunk_')[0];
+      
+      // メタデータから filename を取得
+      const metadata = (context as any).metadata;
+      const filename = metadata?.filename || `Document ${documentId.substring(0, 8)}`;
+      
+      if (docReferences.has(documentId)) {
+        docReferences.get(documentId)!.count++;
+      } else {
+        docReferences.set(documentId, { filename, count: 1 });
+      }
+    });
+    
+    return Array.from(docReferences.entries()).map(([documentId, info]) => ({
+      documentId,
+      filename: info.filename,
+      count: info.count
+    }));
+  };
+
+  const downloadDocument = (documentId: string, filename: string) => {
+    const downloadUrl = `http://localhost:8001/api/v1/documents/${documentId}/download`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className={clsx('flex flex-col h-full bg-white rounded-xl shadow-sm border border-gray-200', className)}>
       {/* Header */}
@@ -227,6 +263,33 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </p>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {/* Reference Documents */}
+                {message.type === 'assistant' && message.contexts && message.contexts.length > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex items-center mb-2">
+                      <FileText className="w-4 h-4 text-blue-600 mr-2" />
+                      <span className="text-sm font-medium text-blue-900">参考文書</span>
+                    </div>
+                    <div className="space-y-1">
+                      {getDocumentReferences(message.contexts).map(({ documentId, filename, count }) => (
+                        <div key={documentId} className="flex items-center justify-between">
+                          <span className="text-sm text-blue-800 truncate mr-2">
+                            {filename} ({count}箇所参照)
+                          </span>
+                          <button
+                            onClick={() => downloadDocument(documentId, filename)}
+                            className="inline-flex items-center px-2 py-1 text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded"
+                            title={`${filename}をダウンロード`}
+                          >
+                            <ExternalLink className="w-3 h-3 mr-1" />
+                            ダウンロード
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

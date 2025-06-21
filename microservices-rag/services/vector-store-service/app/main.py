@@ -1,122 +1,315 @@
-"""
-Vector Store Service
-
-ベクトル検索・類似度検索マイクロサービス
-"""
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uvicorn
-import time
-from datetime import datetime
+import logging
+import numpy as np
+from typing import List, Dict, Any, Optional
+from pydantic import BaseModel
+import json
+import os
 
-from shared.utils.config import VectorStoreServiceConfig
-from shared.utils.logging import setup_logging, get_logger
-from shared.utils.exceptions import RAGServiceException
-from shared.models.base import ErrorResponseModel, ErrorModel
-from .routers import vector_search, health
+# ログ設定
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# 設定とロガー初期化
-config = VectorStoreServiceConfig()
-setup_logging(config.service_name, config.log_level)
-logger = get_logger(__name__)
-
-# FastAPIアプリ作成
 app = FastAPI(
     title="Vector Store Service",
-    description="ベクトル検索・類似度検索マイクロサービス",
-    version=config.version,
-    docs_url="/docs",
-    redoc_url="/redoc"
+    description="ベクトル検索・類似度検索サービス（mainブランチ方式）",
+    version="1.0.0"
 )
 
 # CORS設定
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.cors_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# リクエスト/レスポンス時間計測とログミドルウェア
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """リクエスト処理時間を計測・ログ記録"""
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    
-    logger.info(
-        f"{request.method} {request.url.path} - "
-        f"Status: {response.status_code} - "
-        f"Time: {process_time:.4f}s"
-    )
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
+# データディレクトリ設定
+DATA_DIR = "/app/data"
+VECTOR_STORE_FILE = os.path.join(DATA_DIR, "vectors.json")
 
-# 例外ハンドラー
-@app.exception_handler(RAGServiceException)
-async def rag_exception_handler(request: Request, exc: RAGServiceException):
-    """RAGサービス例外ハンドラー"""
-    logger.error(f"RAG Service Exception: {exc.message}", exc_info=True)
-    
-    error_response = ErrorResponseModel(
-        service=config.service_name,
-        error=ErrorModel(
-            code=exc.error_code,
-            message=exc.message,
-            details=exc.details
-        )
-    )
-    
-    return JSONResponse(
-        status_code=400,
-        content=error_response.model_dump()
-    )
+# リクエスト・レスポンスモデル
+class VectorData(BaseModel):
+    chunk_id: str
+    vector: List[float]
+    metadata: Dict[str, Any] = {}
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """一般例外ハンドラー"""
-    logger.error(f"Unexpected error: {str(exc)}", exc_info=True)
-    
-    error_response = ErrorResponseModel(
-        service=config.service_name,
-        error=ErrorModel(
-            code="internal_server_error",
-            message="An unexpected error occurred"
-        )
-    )
-    
-    return JSONResponse(
-        status_code=500,
-        content=error_response.model_dump()
-    )
+class StoreRequest(BaseModel):
+    document_id: str
+    vectors: List[VectorData]
 
-# ルーター登録
-app.include_router(health.router, tags=["Health"])
-app.include_router(vector_search.router, prefix="/api/v1", tags=["Vector Search"])
+class SearchRequest(BaseModel):
+    document_id: str
+    query_vector: List[float]
+    top_k: int = 5
+    similarity_threshold: float = 0.7  # より高い閾値（mainブランチ相当）
 
-# スタートアップ・シャットダウンイベント
+class GlobalSearchRequest(BaseModel):
+    query_vector: List[float]
+    top_k: int = 10
+    similarity_threshold: float = 0.3
+
+class SearchResult(BaseModel):
+    chunk_id: str
+    similarity_score: float
+    metadata: Dict[str, Any] = {}
+
+class SearchResponse(BaseModel):
+    success: bool
+    results: List[SearchResult]
+    total_found: int
+    query_time: float
+
+# インメモリベクトルストア
+vector_store: Dict[str, List[VectorData]] = {}
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """mainブランチと同じコサイン類似度計算"""
+    # 正規化されたベクトル同士の内積はコサイン類似度と等価
+    # SentenceTransformerではnormalize_embeddings=Trueで正規化済み
+    return float(np.dot(a, b))
+
+def load_vectors():
+    """ベクトルデータを読み込み"""
+    global vector_store
+    try:
+        if os.path.exists(VECTOR_STORE_FILE):
+            with open(VECTOR_STORE_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                vector_store = {}
+                for doc_id, vectors in data.items():
+                    vector_store[doc_id] = [VectorData(**v) for v in vectors]
+            logger.info(f"Loaded {len(vector_store)} documents from storage")
+    except Exception as e:
+        logger.error(f"Failed to load vectors: {e}")
+        vector_store = {}
+
+def save_vectors():
+    """ベクトルデータを保存"""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        data = {}
+        for doc_id, vectors in vector_store.items():
+            data[doc_id] = [v.dict() for v in vectors]
+        
+        with open(VECTOR_STORE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved {len(vector_store)} documents to storage")
+    except Exception as e:
+        logger.error(f"Failed to save vectors: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     """サービス起動時の処理"""
-    logger.info(f"🚀 {config.service_name} starting up...")
-    logger.info(f"🔧 Config: Debug={config.debug}, Port={config.port}")
-    logger.info(f"🔍 Vector search settings: index_type={config.default_index_type}, metric={config.default_metric_type}")
+    load_vectors()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """サービス終了時の処理"""
-    logger.info(f"🔄 {config.service_name} shutting down...")
+@app.get("/health")
+async def health_check():
+    """ヘルスチェックエンドポイント"""
+    return {
+        "status": "healthy",
+        "service": "vector-store-service",
+        "version": "1.0.0-improved-similarity",
+        "documents_count": len(vector_store)
+    }
 
-# 開発用サーバー起動
+@app.get("/")
+async def root():
+    """ルートエンドポイント"""
+    return {
+        "message": "Vector Store Service (Improved Similarity)",
+        "status": "running"
+    }
+
+@app.post("/api/v1/vector/store")
+async def store_vectors(request: StoreRequest):
+    """ベクトルを保存"""
+    try:
+        document_id = request.document_id
+        
+        # ベクトル次元チェック
+        if request.vectors:
+            expected_dim = len(request.vectors[0].vector)
+            for i, vector_data in enumerate(request.vectors):
+                if len(vector_data.vector) != expected_dim:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Vector dimension mismatch at index {i}: expected {expected_dim}, got {len(vector_data.vector)}"
+                    )
+            
+            logger.info(f"Storing vectors with dimension: {expected_dim}")
+        
+        # ベクトルを保存
+        vector_store[document_id] = request.vectors
+        save_vectors()
+        
+        logger.info(f"Stored {len(request.vectors)} vectors for document {document_id}")
+        
+        return {
+            "success": True,
+            "document_id": document_id,
+            "vectors_stored": len(request.vectors),
+            "message": "Vectors stored successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error storing vectors: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to store vectors: {str(e)}")
+
+@app.post("/api/v1/vector/search", response_model=SearchResponse)
+async def search_vectors(request: SearchRequest):
+    """ベクトル検索（mainブランチ方式の類似度計算）"""
+    import time
+    start_time = time.time()
+    
+    try:
+        document_id = request.document_id
+        query_vector = np.array(request.query_vector, dtype=np.float32)
+        
+        logger.info(f"Searching vectors for document: {document_id}")
+        logger.info(f"Query vector dimension: {len(query_vector)}")
+        logger.info(f"Similarity threshold: {request.similarity_threshold}")
+        
+        if document_id not in vector_store:
+            logger.warning(f"Document {document_id} not found in vector store")
+            return SearchResponse(
+                success=True,
+                results=[],
+                total_found=0,
+                query_time=time.time() - start_time
+            )
+        
+        # 類似度計算（mainブランチ方式）
+        similarities = []
+        for vector_data in vector_store[document_id]:
+            stored_vector = np.array(vector_data.vector, dtype=np.float32)
+            
+            # mainブランチと同じコサイン類似度計算
+            similarity = cosine_similarity(query_vector, stored_vector)
+            
+            logger.debug(f"Chunk {vector_data.chunk_id}: similarity = {similarity:.4f}")
+            
+            if similarity >= request.similarity_threshold:
+                similarities.append((similarity, vector_data))
+        
+        # 類似度でソート（降順）
+        similarities.sort(key=lambda x: x[0], reverse=True)
+        
+        logger.info(f"Found {len(similarities)} vectors above threshold {request.similarity_threshold}")
+        
+        # Top-K取得
+        results = []
+        for similarity, vector_data in similarities[:request.top_k]:
+            results.append(SearchResult(
+                chunk_id=vector_data.chunk_id,
+                similarity_score=float(similarity),
+                metadata=vector_data.metadata
+            ))
+        
+        query_time = time.time() - start_time
+        
+        logger.info(f"Vector search completed: {len(results)} results in {query_time:.3f}s")
+        if results:
+            logger.info(f"Top similarity score: {results[0].similarity_score:.4f}")
+        
+        return SearchResponse(
+            success=True,
+            results=results,
+            total_found=len(similarities),
+            query_time=query_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Vector search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+@app.post("/api/v1/vector/search/global", response_model=SearchResponse)
+async def global_search_vectors(request: GlobalSearchRequest):
+    """全ドキュメント横断ベクトル検索"""
+    import time
+    start_time = time.time()
+    
+    try:
+        query_vector = np.array(request.query_vector, dtype=np.float32)
+        
+        logger.info(f"Global vector search across all documents")
+        logger.info(f"Query vector dimension: {len(query_vector)}")
+        logger.info(f"Similarity threshold: {request.similarity_threshold}")
+        
+        # 全ドキュメントからベクトル検索
+        all_similarities = []
+        
+        for document_id, vectors in vector_store.items():
+            for vector_data in vectors:
+                stored_vector = np.array(vector_data.vector, dtype=np.float32)
+                
+                # コサイン類似度計算
+                similarity = cosine_similarity(query_vector, stored_vector)
+                
+                if similarity >= request.similarity_threshold:
+                    all_similarities.append({
+                        "chunk_id": vector_data.chunk_id,
+                        "similarity_score": similarity,
+                        "metadata": vector_data.metadata,
+                        "document_id": document_id
+                    })
+        
+        # 類似度でソートして上位K件を選択
+        all_similarities.sort(key=lambda x: x["similarity_score"], reverse=True)
+        top_results = all_similarities[:request.top_k]
+        
+        results = []
+        for item in top_results:
+            results.append(SearchResult(
+                chunk_id=item["chunk_id"],
+                similarity_score=item["similarity_score"],
+                metadata=item["metadata"]
+            ))
+        
+        query_time = time.time() - start_time
+        
+        logger.info(f"Global search completed: {len(results)} results from {len(vector_store)} documents in {query_time:.3f}s")
+        
+        return SearchResponse(
+            success=True,
+            results=results,
+            total_found=len(results),
+            query_time=query_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in global vector search: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Global search failed: {str(e)}")
+
+@app.get("/api/v1/vector/stats")
+async def get_stats():
+    """ベクトルストアの統計情報"""
+    total_vectors = sum(len(vectors) for vectors in vector_store.values())
+    
+    return {
+        "total_documents": len(vector_store),
+        "total_vectors": total_vectors,
+        "documents": {
+            doc_id: len(vectors) for doc_id, vectors in vector_store.items()
+        }
+    }
+
+@app.delete("/api/v1/vector/document/{document_id}")
+async def delete_document_vectors(document_id: str):
+    """文書のベクトルを削除"""
+    try:
+        if document_id in vector_store:
+            del vector_store[document_id]
+            save_vectors()
+            return {"success": True, "message": f"Deleted vectors for document: {document_id}"}
+        else:
+            return {"success": False, "message": f"Document not found: {document_id}"}
+    except Exception as e:
+        logger.error(f"Error deleting document vectors: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete vectors: {str(e)}")
+
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host=config.host,
-        port=config.port,
-        reload=config.debug,
-        log_level=config.log_level.lower()
-    )
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8004)

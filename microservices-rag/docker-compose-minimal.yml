@@ -1,0 +1,83 @@
+services:
+  # Document Service - PDFアップロード・管理
+  document-service:
+    build:
+      context: ./services/document-service
+      dockerfile: Dockerfile
+    container_name: rag-document-service
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./services/document-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=document-service
+      - PORT=8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+
+  # Text Processing Service - テキスト分割・チャンク化
+  text-processing-service:
+    build:
+      context: ./services/text-processing-service
+      dockerfile: Dockerfile
+    container_name: rag-text-processing-service
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./services/text-processing-service/data:/app/data
+      - ./shared:/app/shared
+    environment:
+      - PYTHONPATH=/app
+      - SERVICE_NAME=text-processing-service
+      - PORT=8002
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - rag-network
+    depends_on:
+      - document-service
+
+  # Frontend - Web UI
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - rag-network
+    depends_on:
+      - document-service
+      - text-processing-service
+
+networks:
+  rag-network:
+    driver: bridge
+    name: rag-microservices-network
+
+volumes:
+  document_data:
+    driver: local
+  text_data:
+    driver: local

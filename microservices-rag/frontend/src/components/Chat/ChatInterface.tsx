@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import { llmService } from '@/services/api';
 import { QuestionAnsweringRequest, ContextItem } from '@/types';
+import { ModeSwitch } from '@/components/Mode/ModeSwitch';
 
 interface Message {
   id: string;
@@ -36,6 +37,8 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showContexts, setShowContexts] = useState<{ [messageId: string]: boolean }>({});
+  const [recommendedModel, setRecommendedModel] = useState('tokyotech-llm/llama-3.1-swallow-8b-instruct-v0.1');
+  const [modelDisplayName, setModelDisplayName] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -45,6 +48,47 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // 推奨モデルの取得
+  useEffect(() => {
+    fetchRecommendedModel();
+  }, []);
+
+  const fetchRecommendedModel = async () => {
+    try {
+      const modelInfo = await llmService.getRecommendedModel();
+      if (modelInfo.success) {
+        setRecommendedModel(modelInfo.recommended_model);
+        
+        // モデル表示名を設定
+        const modelName = modelInfo.recommended_model;
+        let displayName = modelName;
+        
+        // モデル名を短縮して表示
+        if (modelName.includes('/')) {
+          const parts = modelName.split('/');
+          displayName = parts[parts.length - 1]; // 最後の部分のみ
+        }
+        
+        setModelDisplayName(displayName);
+      }
+    } catch (error) {
+      console.error('Failed to fetch recommended model:', error);
+      // フォールバック値を使用
+    }
+  };
+
+  const handleModeChange = (_newMode: string, newModelName: string) => {
+    setRecommendedModel(newModelName);
+    
+    // モデル表示名を更新
+    let displayName = newModelName;
+    if (newModelName.includes('/')) {
+      const parts = newModelName.split('/');
+      displayName = parts[parts.length - 1];
+    }
+    setModelDisplayName(displayName);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +117,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         document_id: documentId,
         context_length: 3,
         similarity_threshold: 0.3,
-        model: 'nvidia/llama-3.1-nemotron-70b-instruct',
+        model: recommendedModel,
         max_tokens: 1000,
         temperature: 0.7,
       };
@@ -172,11 +216,19 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
             質問応答チャット
           </h2>
         </div>
-        {documentId && (
-          <div className="text-sm text-gray-500">
-            ドキュメント: {documentId.slice(0, 8)}...
-          </div>
-        )}
+        <div className="flex items-center space-x-4">
+          {documentId && (
+            <div className="text-sm text-gray-500">
+              ドキュメント: {documentId.slice(0, 8)}...
+            </div>
+          )}
+          {modelDisplayName && (
+            <div className="text-xs text-blue-600 font-medium">
+              モデル: {modelDisplayName}
+            </div>
+          )}
+          <ModeSwitch onModeChange={handleModeChange} />
+        </div>
       </div>
 
       {/* Messages */}

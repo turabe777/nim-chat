@@ -11,7 +11,7 @@ NVIDIA Cloud LLMを使用したRAG（Retrieval-Augmented Generation）システ�
 - SentenceTransformer semantic embeddings実装
 - NVIDIA Cloud LLM統合
 
-### セッション8: システム機能拡張（今回のセッション）
+### セッション8: システム機能拡張・NIMローカル対応（今回のセッション）
 
 #### ✅ 完了した機能追加
 
@@ -40,6 +40,30 @@ NVIDIA Cloud LLMを使用したRAG（Retrieval-Augmented Generation）システ�
 - **参照箇所カウント**: 各文書の参照回数表示
 - **直接ダウンロード**: 参考文書PDFの即時取得
 - **UI改善**: 青いボックスでの視覚的分離
+
+##### 5. NIMローカルエンドポイント対応 🚀 最新機能
+- **3モード対応**: NIM Local → NVIDIA Cloud → Mock の自動切り替え
+- **環境変数制御**: `NIM_LOCAL_ENDPOINT`, `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`
+- **フォールバック機能**: エンドポイント障害時の自動代替
+- **独立API実装**: 各モード専用の応答生成関数
+- **接続テスト**: リアルタイム接続状況確認
+- **Docker統合**: 環境変数による簡単切り替え
+- **実運用テスト完了**: 10.19.55.122:8000 でのNIM接続成功確認
+
+##### 6. モデル名動的取得機能 ✅ 解決済み課題
+- **問題解決**: NVIDIA CloudとローカルNIMのモデル名不一致エラー解決
+- **動的取得API**: `/api/v1/models/recommended`エンドポイント実装
+- **フロントエンド自動選択**: 起動時に推奨モデルを自動取得
+- **リアルタイム表示**: チャット画面にモデル名表示
+- **エラー解消**: UIからの404エラー完全解決
+
+##### 7. LLMモード手動切り替え機能 🎮 最新追加
+- **手動切り替えAPI**: `POST /api/v1/mode/switch`, `GET /api/v1/mode/current`
+- **4モード対応**: Auto/NIM Local/NVIDIA Cloud/Mock
+- **UI統合**: ドロップダウン式モード選択コンポーネント
+- **視覚的表示**: モード別色分け（緑=NIM Local、青=Cloud、グレー=Mock）
+- **利用可能性チェック**: 未設定モードの自動無効化
+- **リアルタイム更新**: モード変更時の即座反映
 
 #### 🔧 技術改善
 
@@ -78,14 +102,17 @@ NVIDIA Cloud LLMを使用したRAG（Retrieval-Augmented Generation）システ�
 - **類似度**: 0.3-0.7 閾値で正常動作
 
 #### 5. LLM Service (Port 8005)
-- **機能**: NVIDIA Cloud LLM統合
-- **新機能**: 複数文書QA、参考文書リンク
-- **フォールバック**: Mock LLM対応
+- **機能**: NVIDIA LLM統合（Cloud + ローカルNIM対応）
+- **新機能**: 複数文書QA、参考文書リンク、手動モード切り替え
+- **4モード**: Auto/NIM Local/NVIDIA Cloud/Mock（手動切り替え可能）
+- **API拡張**: モード切り替え、推奨モデル取得、現在状態確認
+- **バージョン**: 1.2.0-mode-switching
 
 #### 6. Frontend Service (Port 3000)
 - **技術**: React + TypeScript + Tailwind CSS
-- **新機能**: ドキュメント管理、参考文書リンク
-- **UI**: タブ式インターフェース
+- **新機能**: ドキュメント管理、参考文書リンク、モード切り替えUI
+- **UI**: タブ式インターフェース、ドロップダウンモード選択
+- **表示機能**: リアルタイムモード表示、モデル名表示
 
 ### 主要技術スタック
 ```
@@ -125,6 +152,14 @@ GET    /api/v1/documents/{id}/download # ダウンロード
 ```
 POST   /api/v1/qa                  # 単一文書QA
 POST   /api/v1/qa/multi           # 複数文書QA ⭐ 新機能
+GET    /api/v1/test               # LLM接続テスト（NIM/Cloud/Mock）⭐ 新機能
+```
+
+### LLM Mode Management ⭐ 最新機能
+```
+GET    /api/v1/models/recommended  # 推奨モデル名取得
+POST   /api/v1/mode/switch        # モード手動切り替え
+GET    /api/v1/mode/current       # 現在のモード情報
 ```
 
 ### Vector Operations
@@ -139,10 +174,12 @@ GET    /api/v1/vector/stats        # 統計情報
 ### ✅ 動作確認済み
 1. **エンドツーエンドRAGパイプライン**: PDF→処理→埋め込み→検索→回答
 2. **複数文書検索**: 全文書から関連コンテキスト抽出
-3. **NVIDIA LLM統合**: 実際の高品質回答生成
+3. **NVIDIA LLM統合**: 実際の高品質回答生成（Cloud + Local）
 4. **参考文書リンク**: チャット画面での文書ダウンロード
 5. **ドキュメント管理**: 一覧・削除・ダウンロード
 6. **UI/UX**: 完全なWebインターフェース
+7. **NIM Local/Cloud切り替え**: UIからの手動モード切り替え ⭐ 最新機能
+8. **モデル名動的表示**: 現在使用中のモデル名リアルタイム表示 ⭐ 最新機能
 
 ### テスト用コマンド
 ```bash
@@ -161,67 +198,139 @@ curl -X POST http://localhost:8005/api/v1/qa/multi \
 
 # 文書一覧
 curl http://localhost:8001/api/v1/documents
+
+# LLM接続テスト（モード確認）
+curl http://localhost:8005/api/v1/test
+
+# ヘルスチェック（現在のモード表示）
+curl http://localhost:8005/health
+
+# モード切り替えテスト
+curl -X POST http://localhost:8005/api/v1/mode/switch \
+  -H "Content-Type: application/json" \
+  -d '{"mode": "nvidia_cloud"}'
+
+# 現在のモード確認
+curl http://localhost:8005/api/v1/mode/current
+```
+
+### NIMローカル接続テスト
+```bash
+# 1. NIMローカル起動（例）
+docker run -d -p 8000:8000 nvidia/nim-llama-3.1:latest
+
+# 2. 環境変数設定してサービス再起動
+# docker-compose-complete.yml の NIM_LOCAL_ENDPOINT を更新
+NIM_LOCAL_ENDPOINT=http://10.19.55.122:8000 docker-compose -f docker-compose-complete.yml up -d --force-recreate llm-service
+
+# 3. 接続確認
+curl http://localhost:8005/health
+curl http://localhost:8005/api/v1/test
+
+# 4. 実際のQAテスト（モデル名注意）
+curl -X POST http://localhost:8005/api/v1/qa \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "JupyterLabの使用方法について教えてください",
+    "document_id": "8ae15aca-3e1f-4c4c-beaf-359b4dc2fff7",
+    "model": "tokyotech-llm/llama-3.1-swallow-8b-instruct-v0.1"
+  }'
+
+# 5. 利用可能モデル確認
+curl http://localhost:8005/api/v1/test | jq '.available_models'
 ```
 
 ## 残課題・今後の改善項目
 
-### 🟡 中優先度
-1. **バッチ処理機能**
+### ✅ 解決済み課題
+1. **モデル名動的取得機能** ✅ **RESOLVED**
+   - **解決内容**: NVIDIA CloudとローカルNIMのモデル名不一致エラー完全解決
+   - **実装機能**: 
+     - `/api/v1/models/recommended`エンドポイント実装
+     - フロントエンドでの自動モデル選択
+     - リアルタイムモデル名表示
+   - **結果**: UIからの404エラー完全解消、両モード正常動作
+
+2. **LLMモード手動切り替え機能** ✅ **COMPLETED**
+   - **実装内容**: UI上でのNIM Local ⇄ NVIDIA Cloud切り替え
+   - **主要機能**: 
+     - 4モード対応（Auto/NIM Local/NVIDIA Cloud/Mock）
+     - ドロップダウン式UI、視覚的モード表示
+     - 利用可能性チェック、リアルタイム更新
+   - **結果**: シームレスなモード切り替え、完全なユーザビリティ実現
+
+### 🟡 中優先度（次回開発候補）
+1. **ストリーミング応答機能**
+   - リアルタイム応答表示（文字単位）
+   - WebSocket統合
+   - **実装工数**: 1-2日
+   - **効果**: ユーザー体験大幅向上
+
+2. **バッチ処理機能**
    - 複数ファイル同時アップロード
    - 一括処理進捗表示
    - **実装工数**: 1-2日
 
-2. **処理履歴・ログ永続化**
+3. **応答キャッシュ機能**
+   - 同じ質問の高速応答
+   - Redis統合
+   - **実装工数**: 1日
+
+4. **処理履歴・ログ永続化**
    - データベース導入（PostgreSQL推奨）
    - クエリ履歴管理
    - **実装工数**: 2-3日
 
-3. **ユーザー認証・多ユーザー対応**
+5. **ユーザー認証・多ユーザー対応**
    - JWT認証
    - ユーザー別文書管理
    - **実装工数**: 3-4日
 
 ### 🟢 低優先度
-4. **文書タイプ拡張**
+6. **文書タイプ拡張**
    - Word, Excel, PowerPoint対応
    - 画像OCR統合
    - **実装工数**: 2-3日
 
-5. **検索機能拡張**
+7. **検索機能拡張**
    - 全文検索（Elasticsearch）
    - ファセット検索
    - **実装工数**: 3-4日
 
-6. **ダッシュボード・分析機能**
+8. **ダッシュボード・分析機能**
    - 利用統計
    - 文書利用頻度分析
    - **実装工数**: 2-3日
 
 ### 🔴 技術的改善
-7. **プロダクション対応**
+9. **プロダクション対応**
    - Kubernetes deployment
    - CI/CD pipeline
    - モニタリング（Prometheus + Grafana）
    - **実装工数**: 1-2週間
 
-8. **スケーラビリティ改善**
-   - Redis cache導入
-   - Vector DB専用化（Pinecone/Weaviate）
-   - **実装工数**: 1週間
+10. **スケーラビリティ改善**
+    - Redis cache導入
+    - Vector DB専用化（Pinecone/Weaviate）
+    - **実装工数**: 1週間
 
 ## 開発者メモ
 
 ### 重要な実装ポイント
 1. **SentenceTransformer統合**: mainブランチと同等の semantic search精度実現
 2. **NVIDIA API統合**: フォールバック機能で安定性確保
-3. **Docker volume共有**: サービス間ファイルアクセス問題解決
-4. **Pydantic namespace**: protected_namespaces設定で警告解消
+3. **NIMローカル対応**: 3モード自動切り替えアーキテクチャ実装
+4. **Docker volume共有**: サービス間ファイルアクセス問題解決
+5. **Pydantic namespace**: protected_namespaces設定で警告解消
+6. **環境変数設計**: 優先順位制御によるシームレスなエンドポイント切り替え
 
 ### トラブルシューティング記録
 - **Embedding次元問題**: ハッシュベース→SentenceTransformerで解決
 - **類似度低下**: 0.001→0.3-0.7閾値で大幅改善
 - **ファイル共有**: Docker volume設定修正
 - **API認識問題**: Pydantic設定調整
+- **NIM接続問題**: 環境変数とコンテナ内反映の課題→Docker Compose修正で解決
+- **モード切り替え**: 優先順位ロジックとフォールバック機能で安定性確保
 
 ### パフォーマンス最適化
 - **軽量版処理**: 大文書でのハング問題解決
@@ -246,7 +355,8 @@ docker-compose -f docker-compose-complete.yml up -d
 
 ---
 
-**最終更新**: 2025-06-21 15:45 JST  
-**ステータス**: ✅ **完全機能実装完了**  
-**主要達成**: 参考文書リンク機能・複数文書検索・完全UI実装  
-**次回目標**: バッチ処理機能またはユーザー認証実装
+**最終更新**: 2025-06-22 17:30 JST  
+**ステータス**: ✅ **完全機能統合システム完成**  
+**主要達成**: NIM Local/Cloud手動切り替え機能・モデル名動的表示・完全WebUI実装  
+**動作確認**: 両モード正常動作、参考文書表示、エラー完全解消  
+**次回目標**: ストリーミング応答またはキャッシュ機能実装（ユーザー体験向上）

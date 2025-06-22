@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trash2, FileText, Calendar, Download, RefreshCw, AlertCircle, ExternalLink } from 'lucide-react';
+import { Trash2, FileText, Calendar, Download, RefreshCw, AlertCircle } from 'lucide-react';
 
 interface Document {
   document_id: string;

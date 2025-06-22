@@ -94,6 +94,21 @@ export const llmService = {
   testConnection: async (): Promise<any> => {
     const response = await llmApi.get('/api/v1/test');
     return response.data;
+  },
+
+  getRecommendedModel: async (): Promise<any> => {
+    const response = await llmApi.get('/api/v1/models/recommended');
+    return response.data;
+  },
+
+  switchMode: async (mode: string): Promise<any> => {
+    const response = await llmApi.post('/api/v1/mode/switch', { mode });
+    return response.data;
+  },
+
+  getCurrentMode: async (): Promise<any> => {
+    const response = await llmApi.get('/api/v1/mode/current');
+    return response.data;
   }
 };
 
